@@ -25,41 +25,53 @@ class TreeDetector {
     private static final int MAX_NODES = 3000;
     private static final int MAX_RADIUS = 24;
 
-    // 26-direction neighborhood to catch diagonals (logs/leaves mass)
+    // 26-direction neighborhood to catch diagonals (for logs connectivity)
     private static final BlockPos[] NEIGHBORS_26 = buildNeighbors();
 
     private TreeDetector() {}
 
     /**
-     * Flood-fills from a starting log/leaves block and collects all connected logs/leaves.
-     * Works for vanilla and large trees by traversing diagonals.
+     * Detect a single tree: first collect connected logs only, then add leaves adjacent to those logs.
+     * This prevents leaf-only bridges from linking adjacent trees.
      */
     public static Set<BlockPos> detectTree(LevelAccessor level, BlockPos startPos) {
-        Set<BlockPos> result = new HashSet<>();
+        Set<BlockPos> logs = new HashSet<>();
         Set<BlockPos> visited = new HashSet<>();
         ArrayDeque<BlockPos> queue = new ArrayDeque<>();
 
-        if (!isTreeBlock(level.getBlockState(startPos))) return result;
+        if (!level.getBlockState(startPos).is(BlockTags.LOGS)) return logs; // must start on a log
 
         queue.add(startPos);
         visited.add(startPos);
 
+        // Phase 1: flood-fill logs only
         while (!queue.isEmpty() && visited.size() < MAX_NODES) {
             BlockPos pos = queue.removeFirst();
             BlockState state = level.getBlockState(pos);
+            if (state.is(BlockTags.LOGS)) {
+                logs.add(pos);
+                for (BlockPos d : NEIGHBORS_26) {
+                    BlockPos next = pos.offset(d);
+                    if (visited.contains(next)) continue;
+                    if (manhattan(startPos, next) > MAX_RADIUS) continue;
+                    if (level.getBlockState(next).is(BlockTags.LOGS)) {
+                        visited.add(next);
+                        queue.add(next);
+                    }
+                }
+            }
+        }
 
-            if (isTreeBlock(state)) result.add(pos);
-
-            for (BlockPos d : NEIGHBORS_26) {
-                BlockPos next = pos.offset(d);
-                if (visited.contains(next)) continue;
-                if (manhattan(startPos, next) > MAX_RADIUS) continue;
-
-                BlockState nextState = level.getBlockState(next);
-                // Only traverse through logs/leaves to stay on the tree
-                if (isTreeBlock(nextState)) {
-                    visited.add(next);
-                    queue.add(next);
+        // Phase 2: include leaves adjacent to any collected log (6-direction neighbors)
+        Set<BlockPos> result = new HashSet<>(logs);
+        if (!logs.isEmpty()) {
+            for (BlockPos logPos : logs) {
+                for (BlockPos adj : sixNeighbors(logPos)) {
+                    if (manhattan(startPos, adj) > MAX_RADIUS) continue;
+                    BlockState st = level.getBlockState(adj);
+                    if (st.is(BlockTags.LEAVES)) {
+                        result.add(adj);
+                    }
                 }
             }
         }
@@ -89,6 +101,13 @@ class TreeDetector {
             }
         }
         return dirs;
+    }
+
+    private static BlockPos[] sixNeighbors(BlockPos pos) {
+        return new BlockPos[] {
+                pos.above(), pos.below(),
+                pos.north(), pos.south(), pos.west(), pos.east()
+        };
     }
 }
 
