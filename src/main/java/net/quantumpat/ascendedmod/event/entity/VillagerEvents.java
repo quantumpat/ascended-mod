@@ -1,4 +1,4 @@
-package net.quantumpat.ascendedmod.event;
+package net.quantumpat.ascendedmod.event.entity;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
