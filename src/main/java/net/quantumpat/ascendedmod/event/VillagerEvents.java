@@ -1,4 +1,4 @@
-package net.quantumpat.ascendedmod.events;
+package net.quantumpat.ascendedmod.event;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -105,7 +105,7 @@ public class VillagerEvents {
 
         if (event.getEntity() instanceof Villager villager) {
 
-            //Set the villager name to a random name from the list (villager names feature)
+            // Set the villager name to a random name from the list (villager names feature)
             String name = getRandomName();
             villager.setCustomName(Component.literal(getRandomName()));
             villager.setCustomNameVisible(true);
