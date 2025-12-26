@@ -1,6 +1,7 @@
 package net.quantumpat.ascendedmod.event.block;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionHand;
@@ -9,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.common.ToolActions;
+import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
@@ -70,6 +72,10 @@ class TreeDetector {
 
             BlockState state = level.getBlockState(pos);
             if (state.is(BlockTags.LOGS)) {
+                // Skip player-placed logs to avoid felling houses and custom builds
+                if (PlayerPlacedEvents.isPlayerPlaced(level, pos)) {
+                    continue;
+                }
                 logs.add(pos);
                 minX = Math.min(minX, pos.getX());
                 minY = Math.min(minY, pos.getY());
@@ -83,7 +89,8 @@ class TreeDetector {
                     if (visited.contains(next)) continue;
                     if (next.getY() < startY) continue;
                     if (manhattan(startPos, next) > MAX_RADIUS) continue;
-                    if (level.getBlockState(next).is(BlockTags.LOGS)) {
+                    BlockState ns = level.getBlockState(next);
+                    if (ns.is(BlockTags.LOGS) && !PlayerPlacedEvents.isPlayerPlaced(level, next)) {
                         visited.add(next);
                         queue.add(next);
                     }
@@ -212,7 +219,7 @@ public class TreeEvents {
      * @param event - The block break event.
      */
     @SubscribeEvent
-    public static void onBlockBreak(net.minecraftforge.event.level.BlockEvent.BreakEvent event) {
+    public static void onBlockBreak(BlockEvent.BreakEvent event) {
 
         if (!(event.getPlayer() instanceof ServerPlayer player)) return;
         if (player.isCreative()) return;
@@ -221,6 +228,12 @@ public class TreeEvents {
 
         ItemStack held = player.getItemInHand(InteractionHand.MAIN_HAND);
         if (held.isEmpty() || !held.canPerformAction(ToolActions.AXE_DIG)) return;
+
+        // Skip if player-placed origin
+        if (PlayerPlacedEvents.isPlayerPlaced(event.getLevel(), pos)) return;
+
+        // Heuristic gate: must look like a natural tree (leaves near trunk / crown)
+        if (!looksLikeTree(event.getLevel(), pos)) return;
 
         Set<BlockPos> treeBlocks = TreeDetector.detectTree(event.getLevel(), pos);
 
@@ -234,6 +247,44 @@ public class TreeEvents {
 
         if (broken > 0) held.hurtAndBreak(broken, player, EquipmentSlot.MAINHAND);
 
+    }
+
+    // Natural-tree heuristic used to avoid felling house beams and builds
+    private static boolean looksLikeTree(LevelAccessor level, BlockPos origin) {
+        // Scan upward up to a reasonable height to find leaves touching the trunk
+        int maxScan = 32; // supports tall spruce
+        int leavesTouches = 0;
+        BlockPos pos = origin;
+        for (int i = 0; i < maxScan; i++) {
+            BlockState state = level.getBlockState(pos);
+            if (!state.is(BlockTags.LOGS)) break; // stop when trunk ends
+            // Check adjacent positions for leaves
+            for (Direction d : Direction.values()) {
+                if (d == Direction.UP || d == Direction.DOWN) continue; // prefer side leaves
+                BlockPos adj = pos.relative(d);
+                if (level.getBlockState(adj).is(BlockTags.LEAVES)) {
+                    leavesTouches++;
+                    if (leavesTouches >= 3) return true; // threshold: at least 3 side leaf contacts
+                }
+            }
+            pos = pos.above();
+        }
+        // Also check a small leaf cluster above
+        int crownLeaves = 0;
+        BlockPos topCheck = origin.above(2);
+        for (BlockPos check : neighborsCube(topCheck, 1)) {
+            if (level.getBlockState(check).is(BlockTags.LEAVES)) crownLeaves++;
+        }
+        return crownLeaves >= 5; // fallback: crown cluster present
+    }
+
+    private static Iterable<BlockPos> neighborsCube(BlockPos center, int radius) {
+        Set<BlockPos> out = new HashSet<>();
+        for (int dx = -radius; dx <= radius; dx++)
+            for (int dy = -radius; dy <= radius; dy++)
+                for (int dz = -radius; dz <= radius; dz++)
+                    out.add(center.offset(dx, dy, dz));
+        return out;
     }
 
 }
