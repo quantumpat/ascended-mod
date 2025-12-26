@@ -34,9 +34,10 @@ class TreeDetector {
     private static final int MAX_RADIUS = 32;
 
     /**
-     * Maximum horizontal branch spread allowed from the origin column to follow side branches (e.g., acacia).
+     * Max number of trunk seed columns to use.
+     * 1 for normal trees, up to 4 for 2x2 trunks (dark oak).
      */
-    private static final int BRANCH_XZ_SPREAD = 2;
+    private static final int MAX_TRUNK_SEEDS = 4;
 
     /**
      * Radius around the origin to seed trunk columns.
@@ -77,6 +78,12 @@ class TreeDetector {
     private static final int LEAF_LOCAL_RADIUS = 5;
 
     /**
+     * Once we are at/above the canopy (where logs touch leaves), allow a bit more branch drift.
+     * This is important for big oak trees that have logs embedded throughout the leaves.
+     */
+    private static final int CANOPY_BRANCH_DRIFT_LIMIT = 5;
+
+    /**
      * 26-directional neighbor offsets.
      */
     private static final BlockPos[] NEIGHBORS_26 = buildNeighbors();
@@ -97,8 +104,8 @@ class TreeDetector {
 
         final int startY = startPos.getY();
 
-        // Phase 0: seed trunk cluster at origin Y to capture multi-column trunks (e.g., dark oak)
-        // IMPORTANT: keep it tight so we don't accidentally include another nearby trunk.
+        // Phase 0: seed trunk cluster at origin Y.
+        // IMPORTANT: only keep the closest few seeds to avoid accidentally picking up a nearby tree.
         Set<BlockPos> trunkSeeds = new HashSet<>();
         for (int dx = -TRUNK_CLUSTER_RADIUS; dx <= TRUNK_CLUSTER_RADIUS; dx++) {
             for (int dz = -TRUNK_CLUSTER_RADIUS; dz <= TRUNK_CLUSTER_RADIUS; dz++) {
@@ -111,6 +118,15 @@ class TreeDetector {
         }
         if (trunkSeeds.isEmpty()) trunkSeeds.add(startPos);
 
+        // Reduce seed set to the closest MAX_TRUNK_SEEDS by XZ distance.
+        trunkSeeds = trimToClosestSeeds(trunkSeeds, startPos, MAX_TRUNK_SEEDS);
+
+        // If the seed set contains two clearly separated clusters at ground level, abort.
+        // This indicates we likely captured multiple neighboring trees.
+        if (!isSingleTrunkComponent(trunkSeeds)) {
+            return Set.of(startPos);
+        }
+
         // Initialize BFS with all trunk seeds
         for (BlockPos seed : trunkSeeds) {
             queue.add(seed);
@@ -121,6 +137,9 @@ class TreeDetector {
         int minX = startPos.getX(), minY = startY, minZ = startPos.getZ();
         int maxX = startPos.getX(), maxY = startY, maxZ = startPos.getZ();
 
+        // Track the first height where this tree touches leaves; used to loosen drift in canopy.
+        int firstLeafTouchY = Integer.MAX_VALUE;
+
         while (!queue.isEmpty() && visited.size() < MAX_NODES) {
             BlockPos pos = queue.removeFirst();
             if (pos.getY() < startY) continue;
@@ -129,6 +148,20 @@ class TreeDetector {
             if (state.is(BlockTags.LOGS)) {
                 if (PlayerPlacedEvents.isPlayerPlaced(level, pos)) continue; // skip player builds
                 logs.add(pos);
+
+                // Update leaf-touch height if this log touches any leaves.
+                // Keep the minimum Y seen so canopy logic becomes reliable for big oaks.
+                boolean touchesLeaves = false;
+                for (BlockPos adj : sixNeighbors(pos)) {
+                    if (adj.getY() < startY) continue;
+                    if (level.getBlockState(adj).is(BlockTags.LEAVES)) {
+                        touchesLeaves = true;
+                        break;
+                    }
+                }
+                if (touchesLeaves) {
+                    firstLeafTouchY = Math.min(firstLeafTouchY, pos.getY());
+                }
 
                 minX = Math.min(minX, pos.getX());
                 minY = Math.min(minY, pos.getY());
@@ -146,12 +179,16 @@ class TreeDetector {
                     BlockState ns = level.getBlockState(next);
                     if (!ns.is(BlockTags.LOGS) || PlayerPlacedEvents.isPlayerPlaced(level, next)) continue;
 
-                    // Limit horizontal drift relative to nearest trunk seed to avoid crossing into neighboring trees.
                     BlockPos nearestSeed = nearest(trunkSeeds, next);
                     int driftXZ = Math.abs(next.getX() - nearestSeed.getX()) + Math.abs(next.getZ() - nearestSeed.getZ());
 
                     int height = next.getY() - startY;
-                    int allowedDrift = (height >= MIN_TRUNK_HEIGHT_FOR_BRANCH_DRIFT) ? BRANCH_DRIFT_LIMIT : COLUMN_HORIZONTAL_SPREAD;
+                    int allowedDrift;
+                    if (firstLeafTouchY != Integer.MAX_VALUE && next.getY() >= firstLeafTouchY) {
+                        allowedDrift = CANOPY_BRANCH_DRIFT_LIMIT;
+                    } else {
+                        allowedDrift = (height >= MIN_TRUNK_HEIGHT_FOR_BRANCH_DRIFT) ? BRANCH_DRIFT_LIMIT : COLUMN_HORIZONTAL_SPREAD;
+                    }
 
                     if (driftXZ <= allowedDrift) {
                         visited.add(next);
@@ -179,7 +216,10 @@ class TreeDetector {
         int boundMinX = minX - LEAF_RADIUS, boundMinY = startY, boundMinZ = minZ - LEAF_RADIUS;
         int boundMaxX = maxX + LEAF_RADIUS, boundMaxY = maxY + LEAF_RADIUS, boundMaxZ = maxZ + LEAF_RADIUS;
 
-        int firstLeafY = findFirstLeafTouchY(level, logs, startY);
+        // Replace the call to findFirstLeafTouchY with the already computed value (fallback to method)
+        int firstLeafY = (firstLeafTouchY == Integer.MAX_VALUE)
+                ? findFirstLeafTouchY(level, logs, startY)
+                : firstLeafTouchY;
 
         ArrayDeque<BlockPos> leafQ = new ArrayDeque<>();
         Set<BlockPos> leafVisited = new HashSet<>();
@@ -350,6 +390,26 @@ class TreeDetector {
             }
         }
         return out;
+    }
+
+    private static Set<BlockPos> trimToClosestSeeds(Set<BlockPos> seeds, BlockPos origin, int max) {
+        if (seeds.size() <= max) return seeds;
+        java.util.List<BlockPos> list = new java.util.ArrayList<>(seeds);
+        list.sort(java.util.Comparator.comparingInt(p -> Math.abs(p.getX() - origin.getX()) + Math.abs(p.getZ() - origin.getZ())));
+        Set<BlockPos> out = new HashSet<>();
+        for (int i = 0; i < Math.min(max, list.size()); i++) out.add(list.get(i));
+        return out;
+    }
+
+    private static boolean isSingleTrunkComponent(Set<BlockPos> seeds) {
+        // For a normal tree, seeds will be 1 block; for dark oak, 4 blocks tightly packed.
+        // We consider it single-component if all seeds are within manhattan distance <= 2 of the first.
+        BlockPos first = seeds.iterator().next();
+        for (BlockPos p : seeds) {
+            int d = Math.abs(p.getX() - first.getX()) + Math.abs(p.getZ() - first.getZ());
+            if (d > 2) return false;
+        }
+        return true;
     }
 }
 
