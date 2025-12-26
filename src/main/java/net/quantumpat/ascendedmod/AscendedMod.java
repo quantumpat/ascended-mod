@@ -14,6 +14,7 @@ import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.quantumpat.ascendedmod.item.ModCreativeTab;
 import net.quantumpat.ascendedmod.item.ModItems;
 import org.slf4j.Logger;
 
@@ -38,6 +39,9 @@ public class AscendedMod {
 
         // Registers mod items
         ModItems.register(modEventBus);
+
+        // Register the mod creative tab
+        ModCreativeTab.register(modEventBus);
 
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);

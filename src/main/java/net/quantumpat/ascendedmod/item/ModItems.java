@@ -16,6 +16,10 @@ public class ModItems {
      */
     public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, "ascendedmod");
 
+    // Simple item used as the icon for the creative tab
+    public static final RegistryObject<Item> ASCENDED_TAB_ICON = ITEMS.register("ascended_tab_icon",
+            () -> new Item(new Item.Properties().stacksTo(1)));
+
     public static final RegistryObject<Item> IRIDIUM_INGOT = ITEMS.register("iridium_ingot",
             () -> new Item(new Item.Properties().stacksTo(64)));
 
