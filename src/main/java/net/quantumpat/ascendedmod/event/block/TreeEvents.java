@@ -3,6 +3,7 @@ package net.quantumpat.ascendedmod.event.block;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -461,7 +462,14 @@ public class TreeEvents {
             }
         }
 
-        if (broken > 0) held.hurtAndBreak(broken, player, EquipmentSlot.MAINHAND);
+        if (broken > 0) {
+            held.hurtAndBreak(broken, player, EquipmentSlot.MAINHAND);
+
+            // Queue nearby leaf cleanup so leaves disappear quickly right after felling.
+            if (event.getLevel() instanceof ServerLevel server) {
+                FastLeafDecayEvents.enqueueBurst(server, treeBlocks);
+            }
+        }
 
     }
 
