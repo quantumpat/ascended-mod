@@ -88,52 +88,85 @@ class TreeDetector {
 
     /**
      * Detects a tree structure starting from the given position.
+     *
+     * Phases:
+     *  0) Seed trunk candidates at the broken log's Y.
+     *  1) Flood-fill logs upward (filters player-placed).
+     *  2) Flood-fill leaves from log-adjacent leaves (constrained to avoid neighboring canopies).
+     *
      * @param level The level to search in.
      * @param startPos The starting position (should be a log).
      * @return A set of BlockPos representing the detected tree (logs and leaves).
      */
     public static Set<BlockPos> detectTree(LevelAccessor level, BlockPos startPos) {
-
-        Set<BlockPos> logs = new HashSet<>();
-        Set<BlockPos> visited = new HashSet<>();
-        ArrayDeque<BlockPos> queue = new ArrayDeque<>();
-
-        if (!level.getBlockState(startPos).is(BlockTags.LOGS)) return logs;
+        if (!level.getBlockState(startPos).is(BlockTags.LOGS)) return Set.of();
 
         final int startY = startPos.getY();
 
-        // Phase 0: seed trunk cluster at origin Y.
-        // IMPORTANT: only keep the closest few seeds to avoid accidentally picking up a nearby tree.
+        // Phase 0: seed trunk cluster
+        Set<BlockPos> trunkSeeds = seedTrunkSeeds(level, startPos, startY);
+        trunkSeeds = trimToClosestSeeds(trunkSeeds, startPos, MAX_TRUNK_SEEDS);
+        if (!isSingleTrunkComponent(trunkSeeds)) return Set.of(startPos);
+
+        // Phase 1: flood-fill logs
+        LogFloodResult logResult = floodFillLogs(level, startPos, startY, trunkSeeds);
+        if (logResult.logs.isEmpty()) return logResult.logs;
+
+        // Phase 2: flood-fill leaves
+        return floodFillLeaves(level, startPos, startY, logResult);
+    }
+
+    /** Result container for log flood-fill output. */
+    private record LogFloodResult(Set<BlockPos> logs,
+                                 int minX, int minY, int minZ,
+                                 int maxX, int maxY, int maxZ,
+                                 int firstLeafTouchY) {
+    }
+
+    /**
+     * Phase 0 - Seed trunk columns around the starting position at the starting Y level.
+     * @param level The level to search in.
+     * @param startPos The starting position.
+     * @param startY The starting Y level.
+     * @return The set of trunk seed BlockPos.
+     */
+    private static Set<BlockPos> seedTrunkSeeds(LevelAccessor level, BlockPos startPos, int startY) {
+
         Set<BlockPos> trunkSeeds = new HashSet<>();
+
         for (int dx = -TRUNK_CLUSTER_RADIUS; dx <= TRUNK_CLUSTER_RADIUS; dx++) {
             for (int dz = -TRUNK_CLUSTER_RADIUS; dz <= TRUNK_CLUSTER_RADIUS; dz++) {
                 BlockPos seed = new BlockPos(startPos.getX() + dx, startY, startPos.getZ() + dz);
                 BlockState st = level.getBlockState(seed);
-                if (st.is(BlockTags.LOGS) && !PlayerPlacedEvents.isPlayerPlaced(level, seed)) {
+                if (st.is(BlockTags.LOGS) && !PlayerPlacedEvents.isPlayerPlaced(level, seed))
                     trunkSeeds.add(seed);
-                }
             }
         }
         if (trunkSeeds.isEmpty()) trunkSeeds.add(startPos);
+        return trunkSeeds;
 
-        // Reduce seed set to the closest MAX_TRUNK_SEEDS by XZ distance.
-        trunkSeeds = trimToClosestSeeds(trunkSeeds, startPos, MAX_TRUNK_SEEDS);
+    }
 
-        // If the seed set contains two clearly separated clusters at ground level, abort.
-        // This indicates we likely captured multiple neighboring trees.
-        if (!isSingleTrunkComponent(trunkSeeds)) return Set.of(startPos);
+    /**
+     * Phase 1 - Flood-fill logs starting from trunk seeds.
+     * @param level The level to search in.
+     * @param startPos The starting position.
+     * @param startY The starting Y level.
+     * @param trunkSeeds The set of trunk seed BlockPos.
+     * @return The LogFloodResult containing detected logs and bounds.
+     */
+    private static LogFloodResult floodFillLogs(LevelAccessor level, BlockPos startPos, int startY, Set<BlockPos> trunkSeeds) {
+        Set<BlockPos> logs = new HashSet<>();
+        Set<BlockPos> visited = new HashSet<>();
+        ArrayDeque<BlockPos> queue = new ArrayDeque<>();
 
-        // Initialize BFS with all trunk seeds
         for (BlockPos seed : trunkSeeds) {
             queue.add(seed);
             visited.add(seed);
         }
 
-        // Phase 1: flood-fill logs from trunk cluster, only above origin, limited horizontal spread from each column
         int minX = startPos.getX(), minY = startY, minZ = startPos.getZ();
         int maxX = startPos.getX(), maxY = startY, maxZ = startPos.getZ();
-
-        // Track the first height where this tree touches leaves; used to loosen drift in canopy.
         int firstLeafTouchY = Integer.MAX_VALUE;
 
         while (!queue.isEmpty() && visited.size() < MAX_NODES) {
@@ -141,85 +174,90 @@ class TreeDetector {
             if (pos.getY() < startY) continue;
 
             BlockState state = level.getBlockState(pos);
-            if (state.is(BlockTags.LOGS)) {
-                if (PlayerPlacedEvents.isPlayerPlaced(level, pos)) continue; // skip player builds
-                logs.add(pos);
+            if (!state.is(BlockTags.LOGS)) continue;
+            if (PlayerPlacedEvents.isPlayerPlaced(level, pos)) continue;
 
-                // Update leaf-touch height if this log touches any leaves.
-                // Keep the minimum Y seen so canopy logic becomes reliable for big oaks.
-                boolean touchesLeaves = false;
-                for (BlockPos adj : sixNeighbors(pos)) {
-                    if (adj.getY() < startY) continue;
-                    if (level.getBlockState(adj).is(BlockTags.LEAVES)) {
-                        touchesLeaves = true;
-                        break;
-                    }
+            logs.add(pos);
+
+            // Update leaf-touch height if this log touches any leaves (min Y)
+            boolean touchesLeaves = false;
+            for (BlockPos adj : sixNeighbors(pos)) {
+                if (adj.getY() < startY) continue;
+                if (level.getBlockState(adj).is(BlockTags.LEAVES)) {
+                    touchesLeaves = true;
+                    break;
                 }
-                if (touchesLeaves)
-                    firstLeafTouchY = Math.min(firstLeafTouchY, pos.getY());
+            }
+            if (touchesLeaves) firstLeafTouchY = Math.min(firstLeafTouchY, pos.getY());
 
-                minX = Math.min(minX, pos.getX());
-                minY = Math.min(minY, pos.getY());
-                minZ = Math.min(minZ, pos.getZ());
-                maxX = Math.max(maxX, pos.getX());
-                maxY = Math.max(maxY, pos.getY());
-                maxZ = Math.max(maxZ, pos.getZ());
+            // Bounds
+            minX = Math.min(minX, pos.getX());
+            minY = Math.min(minY, pos.getY());
+            minZ = Math.min(minZ, pos.getZ());
+            maxX = Math.max(maxX, pos.getX());
+            maxY = Math.max(maxY, pos.getY());
+            maxZ = Math.max(maxZ, pos.getZ());
 
-                for (BlockPos d : NEIGHBORS_26) {
-                    BlockPos next = pos.offset(d);
-                    if (visited.contains(next)) continue;
-                    if (next.getY() < startY) continue;
-                    if (manhattan(startPos, next) > MAX_RADIUS) continue;
+            for (BlockPos d : NEIGHBORS_26) {
+                BlockPos next = pos.offset(d);
+                if (visited.contains(next)) continue;
+                if (next.getY() < startY) continue;
+                if (manhattan(startPos, next) > MAX_RADIUS) continue;
 
-                    BlockState ns = level.getBlockState(next);
-                    if (!ns.is(BlockTags.LOGS) || PlayerPlacedEvents.isPlayerPlaced(level, next)) continue;
+                BlockState ns = level.getBlockState(next);
+                if (!ns.is(BlockTags.LOGS) || PlayerPlacedEvents.isPlayerPlaced(level, next)) continue;
 
-                    BlockPos nearestSeed = nearest(trunkSeeds, next);
-                    int driftXZ = Math.abs(next.getX() - nearestSeed.getX()) + Math.abs(next.getZ() - nearestSeed.getZ());
+                BlockPos nearestSeed = nearest(trunkSeeds, next);
+                int driftXZ = Math.abs(next.getX() - nearestSeed.getX()) + Math.abs(next.getZ() - nearestSeed.getZ());
 
-                    int height = next.getY() - startY;
-                    int allowedDrift;
-                    if (firstLeafTouchY != Integer.MAX_VALUE && next.getY() >= firstLeafTouchY) {
-                        allowedDrift = CANOPY_BRANCH_DRIFT_LIMIT;
-                    } else {
-                        allowedDrift = (height >= MIN_TRUNK_HEIGHT_FOR_BRANCH_DRIFT) ? BRANCH_DRIFT_LIMIT : COLUMN_HORIZONTAL_SPREAD;
-                    }
+                int height = next.getY() - startY;
+                int allowedDrift;
+                if (firstLeafTouchY != Integer.MAX_VALUE && next.getY() >= firstLeafTouchY) {
+                    allowedDrift = CANOPY_BRANCH_DRIFT_LIMIT;
+                } else {
+                    allowedDrift = (height >= MIN_TRUNK_HEIGHT_FOR_BRANCH_DRIFT) ? BRANCH_DRIFT_LIMIT : COLUMN_HORIZONTAL_SPREAD;
+                }
 
-                    if (driftXZ <= allowedDrift) {
-                        visited.add(next);
-                        queue.add(next);
-                    }
+                if (driftXZ <= allowedDrift) {
+                    visited.add(next);
+                    queue.add(next);
                 }
             }
         }
 
-        // Phase 2: BFS leaves seeded from leaves adjacent to logs.
-        // To avoid eating neighboring canopies (dark oak forests), we:
-        //  1) start leaf search at/above the first height where logs touch leaves,
-        //  2) constrain by overall bounds,
-        //  3) constrain by a local radius from the nearest log,
-        //  4) require each leaf to be within LEAF_LOG_MAX_DIST of some detected log.
-        Set<BlockPos> result = new HashSet<>(logs);
-        if (logs.isEmpty()) return result;
+        return new LogFloodResult(logs, minX, minY, minZ, maxX, maxY, maxZ, firstLeafTouchY);
+    }
 
-        // Determine which leaf block types belong to THIS tree.
-        // We collect leaf blocks that are directly adjacent to detected logs.
-        // This prevents us from deleting nearby oak leaves when chopping dark oak,
-        // and works with modded trees (custom leaves) automatically.
+    /**
+     * Phase 2 - Flood-fill leaves starting from log-adjacent leaves.
+     * @param level The level to search in.
+     * @param startPos The starting position.
+     * @param startY The starting Y level.
+     * @param logResult The LogFloodResult from the log flood-fill phase.
+     * @return The set of BlockPos representing the detected tree (logs and leaves).
+     */
+    private static Set<BlockPos> floodFillLeaves(LevelAccessor level, BlockPos startPos, int startY, LogFloodResult logResult) {
+
+        Set<BlockPos> logs = logResult.logs;
+        Set<BlockPos> result = new HashSet<>(logs);
+
         Set<net.minecraft.world.level.block.Block> allowedLeafBlocks = collectAllowedLeafBlocks(level, logs, startY);
 
-        int boundMinX = minX - LEAF_RADIUS, boundMinY = startY, boundMinZ = minZ - LEAF_RADIUS;
-        int boundMaxX = maxX + LEAF_RADIUS, boundMaxY = maxY + LEAF_RADIUS, boundMaxZ = maxZ + LEAF_RADIUS;
+        int boundMinX = logResult.minX - LEAF_RADIUS;
+        int boundMinY = startY;
+        int boundMinZ = logResult.minZ - LEAF_RADIUS;
+        int boundMaxX = logResult.maxX + LEAF_RADIUS;
+        int boundMaxY = logResult.maxY + LEAF_RADIUS;
+        int boundMaxZ = logResult.maxZ + LEAF_RADIUS;
 
-        // Replace the call to findFirstLeafTouchY with the already computed value (fallback to method)
-        int firstLeafY = (firstLeafTouchY == Integer.MAX_VALUE)
+        int firstLeafY = (logResult.firstLeafTouchY == Integer.MAX_VALUE)
                 ? findFirstLeafTouchY(level, logs, startY)
-                : firstLeafTouchY;
+                : logResult.firstLeafTouchY;
 
         ArrayDeque<BlockPos> leafQ = new ArrayDeque<>();
         Set<BlockPos> leafVisited = new HashSet<>();
 
-        // Seed leaves adjacent to logs (6-neighbors), only above firstLeafY
+        // Seed leaves adjacent to logs
         for (BlockPos logPos : logs) {
             for (BlockPos adj : sixNeighbors(logPos)) {
                 if (leafVisited.contains(adj)) continue;
@@ -235,7 +273,6 @@ class TreeDetector {
             }
         }
 
-        // BFS over leaves within bounds and above firstLeafY
         while (!leafQ.isEmpty() && (logs.size() + leafVisited.size()) < MAX_NODES) {
             BlockPos leafPos = leafQ.removeFirst();
             result.add(leafPos);
@@ -526,11 +563,8 @@ public class TreeEvents {
             }
         }
 
-        if (broken > 0) {
+        if (broken > 0)
             held.hurtAndBreak(broken, player, EquipmentSlot.MAINHAND);
-
-            // Fast leaf decay disabled: rely on vanilla leaf decay.
-        }
 
     }
 
