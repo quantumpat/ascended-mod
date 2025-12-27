@@ -44,9 +44,9 @@ class VillagerNamesReloadListener extends SimpleJsonResourceReloadListener {
 
     /**
      * Apply loaded JSON data.
-     * @param files - The files to process.
-     * @param resourceManager - Manages the resources.
-     * @param profilerFiller - Profiler for performance tracking.
+     * @param files The files to process.
+     * @param resourceManager Manages the resources.
+     * @param profilerFiller Profiler for performance tracking.
      */
     @Override
     protected void apply(Map<ResourceLocation, JsonElement> files, ResourceManager resourceManager, ProfilerFiller profilerFiller) {
@@ -68,7 +68,7 @@ class VillagerNamesReloadListener extends SimpleJsonResourceReloadListener {
 
     /**
      * Get the loaded villager names.
-     * @return - The list of loaded villager names.
+     * @return The list of loaded villager names.
      */
     public List<String> getNames() {
         return names;
@@ -89,7 +89,7 @@ public class VillagerEvents {
 
     /**
      * Add the villager names reload listener.
-     * @param event - The event object.
+     * @param event The event object.
      */
     @SubscribeEvent
     public static void onAddReloadListeners(AddReloadListenerEvent event) {
@@ -98,7 +98,7 @@ public class VillagerEvents {
 
     /**
      * Handles when an entity joins the world.
-     * @param event - The event object.
+     * @param event The event object.
      */
     @SubscribeEvent
     public static void onEntityJoin(EntityJoinLevelEvent event) {

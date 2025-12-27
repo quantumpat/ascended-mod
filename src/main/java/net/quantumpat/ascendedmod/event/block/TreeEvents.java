@@ -14,9 +14,7 @@ import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-import java.util.ArrayDeque;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Utility class for detecting trees in the world.
@@ -90,8 +88,8 @@ class TreeDetector {
 
     /**
      * Detects a tree structure starting from the given position.
-     * @param level - The level to search in.
-     * @param startPos - The starting position (should be a log).
+     * @param level The level to search in.
+     * @param startPos The starting position (should be a log).
      * @return A set of BlockPos representing the detected tree (logs and leaves).
      */
     public static Set<BlockPos> detectTree(LevelAccessor level, BlockPos startPos) {
@@ -123,9 +121,7 @@ class TreeDetector {
 
         // If the seed set contains two clearly separated clusters at ground level, abort.
         // This indicates we likely captured multiple neighboring trees.
-        if (!isSingleTrunkComponent(trunkSeeds)) {
-            return Set.of(startPos);
-        }
+        if (!isSingleTrunkComponent(trunkSeeds)) return Set.of(startPos);
 
         // Initialize BFS with all trunk seeds
         for (BlockPos seed : trunkSeeds) {
@@ -159,9 +155,8 @@ class TreeDetector {
                         break;
                     }
                 }
-                if (touchesLeaves) {
+                if (touchesLeaves)
                     firstLeafTouchY = Math.min(firstLeafTouchY, pos.getY());
-                }
 
                 minX = Math.min(minX, pos.getX());
                 minY = Math.min(minY, pos.getY());
@@ -268,9 +263,9 @@ class TreeDetector {
 
     /**
      * Calculates the Manhattan distance between two BlockPos.
-     * @param a - First BlockPos.
-     * @param b - Second BlockPos.
-     * @return - The Manhattan distance.
+     * @param a First BlockPos.
+     * @param b Second BlockPos.
+     * @return The Manhattan distance.
      */
     private static int manhattan(BlockPos a, BlockPos b) {
         return Math.abs(a.getX() - b.getX())
@@ -280,14 +275,14 @@ class TreeDetector {
 
     /**
      * Checks if a BlockPos is within given bounds.
-     * @param p - The BlockPos to check.
-     * @param minX - Minimum X bound.
-     * @param minY - Minimum Y bound.
-     * @param minZ - Minimum Z bound.
-     * @param maxX - Maximum X bound.
-     * @param maxY - Maximum Y bound.
-     * @param maxZ - Maximum Z bound.
-     * @return - True if in bounds, false otherwise.
+     * @param p The BlockPos to check.
+     * @param minX Minimum X bound.
+     * @param minY Minimum Y bound.
+     * @param minZ Minimum Z bound.
+     * @param maxX Maximum X bound.
+     * @param maxY Maximum Y bound.
+     * @param maxZ Maximum Z bound.
+     * @return True if in bounds, false otherwise.
      */
     private static boolean inBounds(BlockPos p, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
         return p.getX() >= minX && p.getX() <= maxX
@@ -297,7 +292,7 @@ class TreeDetector {
 
     /**
      * Builds the 26-directional neighbor offsets.
-     * @return - An array of BlockPos representing the 26 neighbors.
+     * @return An array of BlockPos representing the 26 neighbors.
      */
     private static BlockPos[] buildNeighbors() {
 
@@ -318,8 +313,8 @@ class TreeDetector {
 
     /**
      * Returns the six orthogonal neighbors of a BlockPos.
-     * @param pos - The BlockPos.
-     * @return - An array of the six neighboring BlockPos.
+     * @param pos The BlockPos.
+     * @return An array of the six neighboring BlockPos.
      */
     private static BlockPos[] sixNeighbors(BlockPos pos) {
         return new BlockPos[] {
@@ -328,32 +323,61 @@ class TreeDetector {
         };
     }
 
+    /**
+     * Finds the nearest BlockPos from a set to a given BlockPos using XZ Manhattan distance.
+     * @param seeds The set of BlockPos to search.
+     * @param to The target BlockPos.
+     * @return The nearest BlockPos from the set.
+     */
     private static BlockPos nearest(Set<BlockPos> seeds, BlockPos to) {
+
         BlockPos best = null;
         int bestDist = Integer.MAX_VALUE;
+
         for (BlockPos s : seeds) {
             int d = Math.abs(to.getX() - s.getX()) + Math.abs(to.getZ() - s.getZ());
             if (d < bestDist) { bestDist = d; best = s; }
         }
+
         return best != null ? best : to;
+
     }
 
+    /**
+     * Finds the first Y level where any log touches leaves.
+     * @param level The level to search in.
+     * @param logs The set of log BlockPos.
+     * @param startY The starting Y level.
+     * @return The first Y level where logs touch leaves.
+     */
     private static int findFirstLeafTouchY(LevelAccessor level, Set<BlockPos> logs, int startY) {
+
         int best = Integer.MAX_VALUE;
+
         for (BlockPos logPos : logs) {
             if (logPos.getY() < startY) continue;
             for (BlockPos adj : sixNeighbors(logPos)) {
                 if (adj.getY() < startY) continue;
-                if (level.getBlockState(adj).is(BlockTags.LEAVES)) {
+                if (level.getBlockState(adj).is(BlockTags.LEAVES))
                     best = Math.min(best, logPos.getY());
-                }
             }
         }
+
         // If we never find a leaf touch (e.g., dead trees), fall back to startY
         return best == Integer.MAX_VALUE ? startY : best;
+
     }
 
+    /**
+     * Determines if a leaf block is eligible to be part of the tree.
+     * @param leafPos The position of the leaf block.
+     * @param origin The origin log position.
+     * @param nearestLog The nearest log position.
+     * @param logs The set of detected log positions.
+     * @return True if the leaf is eligible, false otherwise.
+     */
     private static boolean isLeafEligible(BlockPos leafPos, BlockPos origin, BlockPos nearestLog, Set<BlockPos> logs) {
+
         // Keep leaves above origin log.
         if (leafPos.getY() < origin.getY()) return false;
 
@@ -366,42 +390,80 @@ class TreeDetector {
         int dist = Math.abs(leafPos.getX() - best.getX())
                 + Math.abs(leafPos.getY() - best.getY())
                 + Math.abs(leafPos.getZ() - best.getZ());
+
         return dist <= LEAF_LOG_MAX_DIST;
+
     }
 
+    /**
+     * Checks if a BlockState is an allowed leaf type for this tree.
+     * @param state The BlockState to check.
+     * @param allowedLeafBlocks The set of allowed leaf blocks for this tree.
+     * @return True if the BlockState is an allowed leaf, false otherwise.
+     */
     private static boolean isAllowedLeaf(BlockState state, Set<net.minecraft.world.level.block.Block> allowedLeafBlocks) {
+
         // If we couldn't determine a leaf set (rare), fall back to vanilla tag.
-        if (allowedLeafBlocks == null || allowedLeafBlocks.isEmpty()) {
+        if (allowedLeafBlocks == null || allowedLeafBlocks.isEmpty())
             return state.is(BlockTags.LEAVES);
-        }
+
         return state.is(BlockTags.LEAVES) && allowedLeafBlocks.contains(state.getBlock());
+
     }
 
+    /**
+     * Collects the allowed leaf block types adjacent to the detected logs.
+     * @param level The level to search in.
+     * @param logs The set of detected log BlockPos.
+     * @param startY The starting Y level.
+     * @return A set of allowed leaf block types.
+     */
     private static Set<net.minecraft.world.level.block.Block> collectAllowedLeafBlocks(LevelAccessor level, Set<BlockPos> logs, int startY) {
+
         Set<net.minecraft.world.level.block.Block> out = new HashSet<>();
+
         for (BlockPos logPos : logs) {
             if (logPos.getY() < startY) continue;
             for (BlockPos adj : sixNeighbors(logPos)) {
                 if (adj.getY() < startY) continue;
                 BlockState st = level.getBlockState(adj);
-                if (st.is(BlockTags.LEAVES)) {
+                if (st.is(BlockTags.LEAVES))
                     out.add(st.getBlock());
-                }
             }
         }
+
         return out;
+
     }
 
+    /**
+     * Trims a set of BlockPos to the closest ones to the origin, up to max count.
+     * @param seeds The set of BlockPos to trim.
+     * @param origin The origin BlockPos.
+     * @param max The maximum number of BlockPos to keep.
+     * @return The trimmed set of BlockPos.
+     */
     private static Set<BlockPos> trimToClosestSeeds(Set<BlockPos> seeds, BlockPos origin, int max) {
+
         if (seeds.size() <= max) return seeds;
-        java.util.List<BlockPos> list = new java.util.ArrayList<>(seeds);
+
+        List<BlockPos> list = new ArrayList<>(seeds);
         list.sort(java.util.Comparator.comparingInt(p -> Math.abs(p.getX() - origin.getX()) + Math.abs(p.getZ() - origin.getZ())));
         Set<BlockPos> out = new HashSet<>();
+
         for (int i = 0; i < Math.min(max, list.size()); i++) out.add(list.get(i));
+
         return out;
+
     }
 
+    /**
+     * Checks if the trunk seeds form a single connected component.
+     * @param seeds The set of trunk seed BlockPos.
+     * @return True if they form a single component, false otherwise.
+     */
     private static boolean isSingleTrunkComponent(Set<BlockPos> seeds) {
+
         // For a normal tree, seeds will be 1 block; for dark oak, 4 blocks tightly packed.
         // We consider it single-component if all seeds are within manhattan distance <= 2 of the first.
         BlockPos first = seeds.iterator().next();
@@ -409,8 +471,11 @@ class TreeDetector {
             int d = Math.abs(p.getX() - first.getX()) + Math.abs(p.getZ() - first.getZ());
             if (d > 2) return false;
         }
+
         return true;
+
     }
+
 }
 
 /**

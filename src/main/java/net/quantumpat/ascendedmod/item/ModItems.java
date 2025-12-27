@@ -25,7 +25,7 @@ public class ModItems {
 
     /**
      * Registers the mod items.
-     * @param bus - The bus used to register the items.
+     * @param bus The bus used to register the items.
      */
     public static void register(IEventBus bus) {
         ITEMS.register(bus);
