@@ -568,8 +568,14 @@ public class TreeEvents {
 
     }
 
-    // Natural-tree heuristic used to avoid felling house beams and builds
+    /**
+     * Heuristic to check if a log column looks like a tree trunk.
+     * @param level The level to check in.
+     * @param origin The starting BlockPos.
+     * @return True if it looks like a tree, false otherwise.
+     */
     private static boolean looksLikeTree(LevelAccessor level, BlockPos origin) {
+
         int maxScan = 48; // extend scan for branched/tricky trees
         int leavesTouches = 0;
         int logCount = 0;
@@ -595,15 +601,22 @@ public class TreeEvents {
         // Crown cluster above the origin
         int crownLeaves = 0;
         BlockPos topCheck = origin.above(2);
-        for (BlockPos check : neighborsCube(topCheck, 1)) {
+        for (BlockPos check : neighborsCube(topCheck, 1))
             if (level.getBlockState(check).is(BlockTags.LEAVES)) crownLeaves++;
-        }
+
         // Relaxed thresholds further for acacia: accept with branches and minimal leaves
         boolean sparseTreeOk = (logCount >= 5) && (leavesTouches >= 1 || crownLeaves >= 2 || branchContacts >= 2);
         boolean ampleLeavesOk = leavesTouches >= 2 || crownLeaves >= 4;
         return sparseTreeOk || ampleLeavesOk;
+
     }
 
+    /**
+     * Generates neighboring BlockPos in a cube around a center.
+     * @param center The center BlockPos.
+     * @param radius The radius of the cube.
+     * @return An iterable of neighboring BlockPos.
+     */
     private static Iterable<BlockPos> neighborsCube(BlockPos center, int radius) {
         Set<BlockPos> out = new HashSet<>();
         for (int dx = -radius; dx <= radius; dx++)
