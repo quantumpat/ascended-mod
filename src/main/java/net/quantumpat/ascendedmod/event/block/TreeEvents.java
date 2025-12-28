@@ -18,6 +18,13 @@ import java.util.List;
 
 class TreeDetector {
 
+    /**
+     * Gets all the blocks in a tree starting from a given block.
+     * @param startingBlock The block to start from.
+     * @param levelAccessor The level accessor.
+     * @param player The player breaking the block.
+     * @return All the tree blocks.
+     */
     public static List<BlockPos> getTreeBlocks(BlockPos startingBlock, LevelAccessor levelAccessor, ServerPlayer player) {
 
         List<BlockPos> treeBlocks = new ArrayList<>();
@@ -65,12 +72,13 @@ class TreeDetector {
 
     }
 
-    private static BlockPos getCornerLog(BlockPos startingLog, LevelAccessor levelAccessor) {
-
-        return startingLog;
-
-    }
-
+    /**
+     * Gets all the logs in the current layer of the trunk.
+     * @param blockPos The starting block position (cornor block).
+     * @param levelAccessor The level accessor.
+     * @param trunkWidth The width of the trunk.
+     * @return A list of all logs in a particular layer.
+     */
     private static List<BlockPos> getLogsInLayer(BlockPos blockPos, LevelAccessor levelAccessor, int trunkWidth) {
 
         List<BlockPos> logsInLayer = new ArrayList<>();
@@ -84,15 +92,6 @@ class TreeDetector {
         }else logsInLayer.add(blockPos);
 
         return logsInLayer;
-
-    }
-
-    private static List<BlockPos> getNeighboringLogs(BlockPos blockPos, LevelAccessor levelAccessor) {
-
-        List<BlockPos> neighboringLogs = new ArrayList<>();
-
-
-        return neighboringLogs;
 
     }
 
